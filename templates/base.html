@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}ASR Demo{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-slate-100 text-slate-900">
+    <div class="max-w-5xl mx-auto px-4 py-10">
+        <header class="mb-10 text-center space-y-4">
+            <h1 class="text-3xl font-bold">Sistema de Transcripcion</h1>
+            <p class="text-sm text-slate-600">Comparacion en tiempo real entre Whisper fine-tuned y Google Speech Recognition.</p>
+            <nav class="flex justify-center gap-3">
+                <a href="{% url 'upload' %}" class="px-4 py-2 rounded-lg bg-slate-900 text-white font-medium shadow hover:bg-slate-700 transition">Subir Audio</a>
+                <a href="{% url 'record' %}" class="px-4 py-2 rounded-lg bg-emerald-500 text-white font-medium shadow hover:bg-emerald-400 transition">Grabar en Tiempo Real</a>
+            </nav>
+        </header>
+        <main class="space-y-6">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+</body>
+</html>

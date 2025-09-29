@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Subir audio{% endblock %}
+
+{% block content %}
+<div class="bg-white shadow rounded-lg p-6 space-y-6">
+    <div class="space-y-2">
+        <h2 class="text-2xl font-semibold text-slate-900">Subir archivo de audio</h2>
+        <p class="text-sm text-slate-600">Selecciona un archivo para comparar la transcripcion entre ambos modelos.</p>
+    </div>
+    <form method="post" enctype="multipart/form-data" class="space-y-4">
+        {% csrf_token %}
+        <label class="block">
+            <span class="text-sm font-medium text-slate-700">Archivo de audio</span>
+            <input type="file" name="audio" accept="audio/*" required class="mt-2 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200">
+        </label>
+        <button type="submit" class="inline-flex items-center justify-center rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-400 transition">Transcribir</button>
+    </form>
+</div>
+
+{% if results %}
+<div class="grid gap-4 md:grid-cols-2">
+    <div class="rounded-lg bg-white p-5 shadow">
+        <h3 class="text-lg font-semibold text-slate-900">Whisper</h3>
+        <p class="mt-2 text-sm text-slate-600">{{ results.whisper }}</p>
+    </div>
+    <div class="rounded-lg bg-white p-5 shadow">
+        <h3 class="text-lg font-semibold text-slate-900">SpeechRecognition (Google)</h3>
+        <p class="mt-2 text-sm text-slate-600">{{ results.speech }}</p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

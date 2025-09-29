@@ -1,0 +1,331 @@
+{% extends "base.html" %}
+{% block title %}Grabacion en tiempo real{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <div class="bg-white shadow rounded-lg p-6 space-y-4">
+        <div class="space-y-2">
+            <h2 class="text-2xl font-semibold text-slate-900">Grabacion en tiempo real</h2>
+            <p class="text-sm text-slate-600">Presiona iniciar para enviar audio al servidor cada segundo y comparar ambos modelos.</p>
+        </div>
+        <div class="flex flex-wrap gap-3 items-center">
+            <button id="startBtn" class="inline-flex items-center justify-center rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-400 transition">Iniciar</button>
+            <button id="stopBtn" class="inline-flex items-center justify-center rounded-lg bg-rose-500 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-rose-400 transition disabled:opacity-50 disabled:cursor-not-allowed" disabled>Detener</button>
+            <span id="status" class="text-sm font-medium text-slate-700">Estado: Inactivo</span>
+            <span id="latency" class="text-xs text-slate-500"></span>
+        </div>
+        <div id="feedback" class="text-sm"></div>
+    </div>
+
+    <div class="grid gap-6 md:grid-cols-2">
+        <div class="bg-white shadow rounded-lg p-5 space-y-4">
+            <div class="flex justify-between items-center">
+                <h3 class="text-lg font-semibold text-slate-900">Whisper</h3>
+                <span class="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-600">Fine-tuned</span>
+            </div>
+            <div class="space-y-2">
+                <span class="text-xs font-medium uppercase tracking-wide text-slate-500">Transcripcion parcial</span>
+                <div id="whisperPartial" class="min-h-[96px] rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm leading-relaxed text-slate-700">Esperando audio...</div>
+                <div id="whisperStatus" class="text-xs text-slate-500"></div>
+            </div>
+            <div class="space-y-2">
+                <span class="text-xs font-medium uppercase tracking-wide text-slate-500">Resultado final</span>
+                <div id="whisperFinal" class="min-h-[72px] rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm leading-relaxed text-emerald-700">--</div>
+            </div>
+        </div>
+
+        <div class="bg-white shadow rounded-lg p-5 space-y-4">
+            <div>
+                <h3 class="text-lg font-semibold text-slate-900">SpeechRecognition</h3>
+                <p class="text-xs text-slate-500">Google API</p>
+            </div>
+            <div class="space-y-2">
+                <span class="text-xs font-medium uppercase tracking-wide text-slate-500">Transcripcion parcial</span>
+                <div id="speechPartial" class="min-h-[96px] rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm leading-relaxed text-slate-700">Esperando audio...</div>
+                <div id="speechStatus" class="text-xs text-slate-500"></div>
+            </div>
+            <div class="space-y-2">
+                <span class="text-xs font-medium uppercase tracking-wide text-slate-500">Resultado final</span>
+                <div id="speechFinal" class="min-h-[72px] rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-relaxed text-amber-700">--</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function getCSRF() {
+    const name = 'csrftoken=';
+    return document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith(name))?.substring(name.length) || '';
+}
+
+const csrf = getCSRF();
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const statusEl = document.getElementById('status');
+const latencyEl = document.getElementById('latency');
+const feedbackEl = document.getElementById('feedback');
+const partialEls = {
+    whisper: document.getElementById('whisperPartial'),
+    speech: document.getElementById('speechPartial'),
+};
+const finalEls = {
+    whisper: document.getElementById('whisperFinal'),
+    speech: document.getElementById('speechFinal'),
+};
+const statusEls = {
+    whisper: document.getElementById('whisperStatus'),
+    speech: document.getElementById('speechStatus'),
+};
+
+let mediaRecorder = null;
+let currentStream = null;
+let sessionId = null;
+let partIndex = 0;
+const partialBuffers = {
+    whisper: '',
+    speech: '',
+};
+let lastChunkAt = null;
+
+function resetTranscriptUI() {
+    partialBuffers.whisper = '';
+    partialBuffers.speech = '';
+    partialEls.whisper.textContent = 'Esperando audio...';
+    partialEls.speech.textContent = 'Esperando audio...';
+    finalEls.whisper.textContent = '--';
+    finalEls.speech.textContent = '--';
+    statusEls.whisper.textContent = '';
+    statusEls.speech.textContent = '';
+    latencyEl.textContent = '';
+    feedbackEl.innerHTML = '';
+}
+
+function setStatus(message) {
+    statusEl.textContent = `Estado: ${message}`;
+}
+
+function updatePartial(model, text) {
+    const clean = (text || '').trim();
+    if (!clean) {
+        return;
+    }
+
+    // Actualizar el buffer y el UI
+    partialBuffers[model] = clean;
+    partialEls[model].textContent = clean;
+    
+    // Mostrar estado de actualización
+    const now = new Date().toLocaleTimeString();
+    statusEls[model].textContent = `Actualizado: ${now}`;
+}
+
+function updateStatus(model, message) {
+    statusEls[model].textContent = message;
+}
+
+function handleChunkErrors(errors) {
+    if (!errors) {
+        return;
+    }
+    
+    let messages = [];
+    if (errors.whisper) {
+        messages.push(`<span class="text-orange-600">Whisper: ${errors.whisper}</span>`);
+        updateStatus('whisper', `Error: ${errors.whisper}`);
+    }
+    if (errors.speech) {
+        messages.push(`<span class="text-orange-600">Speech: ${errors.speech}</span>`);
+        updateStatus('speech', `Error: ${errors.speech}`);
+    }
+    
+    if (messages.length > 0) {
+        feedbackEl.innerHTML = `<div class="text-sm">${messages.join(' | ')}</div>`;
+    }
+}
+
+function stopCurrentStream() {
+    if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+        currentStream = null;
+    }
+}
+
+async function finalizeSession() {
+    setStatus('Finalizando...');
+    
+    // Limpiar estados de error previos
+    statusEls.whisper.textContent = 'Procesando transcripción final...';
+    statusEls.speech.textContent = 'Procesando transcripción final...';
+    
+    try {
+        const started = performance.now();
+        const resp = await fetch('/asr/realtime_finalize/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': csrf,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ session_id: sessionId }),
+        });
+
+        if (!resp.ok) {
+            throw new Error(`Respuesta ${resp.status}`);
+        }
+
+        const data = await resp.json();
+        
+        if (data.final) {
+            const whisperResult = data.final.whisper || '--';
+            const speechResult = data.final.speech || '--';
+            
+            finalEls.whisper.textContent = whisperResult;
+            finalEls.speech.textContent = speechResult;
+            
+            // Actualizar estados
+            if (whisperResult && whisperResult !== '--') {
+                statusEls.whisper.textContent = 'Transcripción final completada';
+            }
+            if (speechResult && speechResult !== '--') {
+                statusEls.speech.textContent = 'Transcripción final completada';
+            }
+        }
+
+        if (data.errors) {
+            handleChunkErrors(data.errors);
+            setStatus('Finalizado con errores');
+        } else {
+            // Solo limpiar feedback si no hay errores críticos
+            if (!feedbackEl.textContent.includes('Error crítico')) {
+                feedbackEl.innerHTML = '<span class="text-emerald-600">Transcripción completada exitosamente</span>';
+            }
+            setStatus('Finalizado');
+        }
+        
+        const latency = Math.max(0, performance.now() - started);
+        latencyEl.textContent = `Transcripción final: ${(latency / 1000).toFixed(2)} s`;
+        
+    } catch (error) {
+        console.error('Error al finalizar', error);
+        feedbackEl.innerHTML = `<span class="text-red-600">Error crítico al finalizar: ${error.message}</span>`;
+        setStatus('Error al finalizar');
+        statusEls.whisper.textContent = 'Error en transcripción final';
+        statusEls.speech.textContent = 'Error en transcripción final';
+    } finally {
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        mediaRecorder = null;
+        sessionId = null;
+        partIndex = 0;
+        stopCurrentStream();
+    }
+}
+
+async function sendChunk(blob) {
+    partIndex += 1;
+    lastChunkAt = performance.now();
+    const formData = new FormData();
+    formData.append('audio', blob, `part_${partIndex}.webm`);
+    formData.append('session_id', sessionId);
+    formData.append('part_index', String(partIndex));
+
+    try {
+        const started = performance.now();
+        const resp = await fetch('/asr/realtime_chunk/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': csrf,
+            },
+            body: formData,
+        });
+
+        if (!resp.ok) {
+            throw new Error(`Respuesta ${resp.status}`);
+        }
+
+        const json = await resp.json();
+        
+        if (json.partial) {
+            if (json.partial.whisper) {
+                updatePartial('whisper', json.partial.whisper);
+            } else if (partIndex < 4) {
+                // Mostrar mensaje informativo para chunks tempranos
+                updateStatus('whisper', `Esperando más audio... (chunk ${partIndex}/4)`);
+            } else {
+                // Si ya deberíamos tener resultado pero no lo hay
+                updateStatus('whisper', 'Sin transcripción disponible');
+            }
+            
+            if (json.partial.speech) {
+                updatePartial('speech', json.partial.speech);
+            }
+        }
+        
+        if (json.errors) {
+            handleChunkErrors(json.errors);
+        } else if (!feedbackEl.textContent.includes('Error crítico')) {
+            // Solo limpiar si no hay errores críticos
+            const successCount = partIndex;
+            feedbackEl.innerHTML = `<span class="text-slate-600">Chunks procesados: ${successCount}</span>`;
+        }
+        
+        const latency = Math.max(0, performance.now() - started);
+        latencyEl.textContent = `Último chunk: ${(latency / 1000).toFixed(2)} s`;
+        
+    } catch (error) {
+        console.error('Error al enviar chunk', error);
+        feedbackEl.innerHTML = `<span class="text-red-600">Error al enviar audio: ${error.message}</span>`;
+        updateStatus('whisper', 'Error en conexión');
+        updateStatus('speech', 'Error en conexión');
+    }
+}
+
+startBtn.addEventListener('click', async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        feedbackEl.innerHTML = '<span class="text-red-600">Tu navegador no soporta la API de grabación.</span>';
+        return;
+    }
+
+    resetTranscriptUI();
+    setStatus('Preparando micrófono...');
+
+    try {
+        sessionId = crypto?.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        currentStream = stream;
+        mediaRecorder = new MediaRecorder(stream);
+        partIndex = 0;
+
+        mediaRecorder.ondataavailable = event => {
+            if (event.data && event.data.size > 0) {
+                sendChunk(event.data);
+            }
+        };
+
+        mediaRecorder.onstop = finalizeSession;
+
+        mediaRecorder.start(2000); // Aumentar a 2s para mejor calidad de audio
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        setStatus('Grabando...');
+        feedbackEl.innerHTML = '<span class="text-emerald-600">Grabación iniciada</span>';
+        
+    } catch (error) {
+        console.error('No se pudo acceder al micrófono', error);
+        feedbackEl.innerHTML = `<span class="text-red-600">No se pudo acceder al micrófono: ${error.message}</span>`;
+        setStatus('Inactivo');
+        stopCurrentStream();
+    }
+});
+
+stopBtn.addEventListener('click', () => {
+    if (!mediaRecorder) {
+        return;
+    }
+    stopBtn.disabled = true;
+    startBtn.disabled = true;
+    setStatus('Procesando...');
+    feedbackEl.innerHTML = '<span class="text-blue-600">Deteniendo grabación y procesando transcripción final...</span>';
+    mediaRecorder.stop();
+});
+</script>
+{% endblock %}
