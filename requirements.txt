@@ -11,6 +11,7 @@ ffmpeg-python==0.2.0
 filelock==3.19.1
 fsspec==2025.9.0
 future==1.0.0
+gunicorn==23.0.0
 huggingface-hub==0.35.1
 idna==3.10
 Jinja2==3.1.6
