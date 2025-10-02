@@ -92,7 +92,8 @@ USE_TZ = True
 # Archivos estáticos
 # =========================
 STATIC_URL = "/static/"
-STATIC_ROOT = BASE_DIR / "staticfiles"  # importante para Railway + whitenoise
+STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")    # para collectstatic en prod
+
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 MEDIA_URL = "/media/"
